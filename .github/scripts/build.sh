@@ -23,7 +23,7 @@ case "$mode" in
   compile) formulas=(make ldid) ;;
   package)
     [[ "$version" =~ ^0\.0\.[1-9][0-9]*$ ]]
-    test "$(rg -x "Version: $version" -F control)" = "Version: $version"
+    python3 -c 'import re, sys; from pathlib import Path; sys.exit(re.findall(r"^Version: (\S+)$", Path("control").read_text(), re.M) != [sys.argv[1]])' "$version"
     formulas=(make ldid dpkg)
     ;;
   *) echo 'Unknown build mode' >&2; exit 1 ;;
@@ -46,13 +46,17 @@ make --version
 
 if [[ "$mode" = compile ]]; then
   make all FINALPACKAGE=1
-  ! compgen -G 'packages/*.deb'
-  exit
+  if compgen -G 'packages/*.deb' >/dev/null; then
+    echo 'Unexpected Debian package in compile-only job' >&2
+    exit 1
+  fi
+  exit 0
 fi
 
 make clean package FINALPACKAGE=1
 set -- packages/*.deb
-test "$#" = 1 && test -f "$1"
+test "$#" = 1
+test -f "$1"
 test "$(dpkg-deb -f "$1" Package)" = com.knight914.minispersona
 test "$(dpkg-deb -f "$1" Version)" = "$version"
 test "$(dpkg-deb -f "$1" Architecture)" = "$architecture"

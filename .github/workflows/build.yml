@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       formal_package:
-        description: Request formal .deb packaging after both compile checks pass
+        description: Request device-test .deb packaging after both compile checks pass
         type: boolean
         default: false
 
@@ -36,7 +36,7 @@ jobs:
           set -euo pipefail
           test "$GITHUB_RUN_ATTEMPT" = 1 || { echo 'Reruns are disabled; reserve a new version.'; exit 1; }
           gh api --paginate "repos/$GITHUB_REPOSITORY/actions/workflows/build.yml/runs?per_page=100" \
-            --jq '.workflow_runs[] | [.id, .display_title] | @tsv' > "$RUNNER_TEMP/minispersona-runs"
+            --jq '.workflow_runs[] | [.id, .run_number, .display_title] | @tsv' > "$RUNNER_TEMP/minispersona-runs"
           python3 - <<'PY'
           import os, re
           from pathlib import Path
@@ -45,17 +45,18 @@ jobs:
           match = re.fullmatch(r'0\.0\.([1-9][0-9]*)', version)
           if not match or re.findall(r'^Version: (\S+)$', Path('control').read_text(), re.M) != [version]:
               raise SystemExit('The input must match the single 0.0.N Version in control.')
-          run_id = int(os.environ['GITHUB_RUN_ID'])
-          runs = [line.split('\t', 1) for line in (Path(os.environ['RUNNER_TEMP']) / 'minispersona-runs').read_text().splitlines()]
-          if (str(run_id), f'MinisPersona {version}') not in [tuple(run) for run in runs]:
+          run_id = os.environ['GITHUB_RUN_ID']
+          number = os.environ['GITHUB_RUN_NUMBER']
+          runs = [line.split('\t', 2) for line in (Path(os.environ['RUNNER_TEMP']) / 'minispersona-runs').read_text().splitlines()]
+          if [run_id, number, f'MinisPersona {version}'] not in runs:
               raise SystemExit('This dispatch is not yet visible in workflow history; stop closed.')
           previous = []
-          for ident, title in runs:
+          for _, ordinal, title in runs:
               prior = re.fullmatch(r'MinisPersona 0\.0\.([1-9][0-9]*)', title)
-              if int(ident) < run_id and prior:
+              if int(ordinal) < int(number) and prior:
                   previous.append(int(prior[1]))
           patch = int(match[1])
-          if not previous and patch != 1 or previous and patch <= max(previous):
+          if (not previous and patch != 1) or (previous and patch <= max(previous)):
               raise SystemExit('Start at 0.0.1, then reserve a version above every earlier dispatch.')
           PY
 
@@ -82,7 +83,6 @@ jobs:
   package:
     needs: compile
     if: ${{ inputs.formal_package && github.run_attempt == '1' }}
-    environment: formal-packaging
     runs-on: macos-15
     strategy:
       fail-fast: false
@@ -92,7 +92,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
-      - name: Build and inspect the formal package
+      - name: Build and inspect the device-test package
         env:
           SCHEME: ${{ matrix.scheme }}
           VERSION: ${{ inputs.version }}
@@ -101,6 +101,6 @@ jobs:
           bash .github/scripts/build.sh "$SCHEME" package "$VERSION"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: MinisPersona-${{ matrix.scheme }}-${{ inputs.version }}
+          name: MinisPersona-test-${{ matrix.scheme }}-${{ inputs.version }}
           path: packages/*.deb
           if-no-files-found: error

@@ -1,6 +1,18 @@
 # MinisPersona
 
-A standalone interim CLI, not an iOS tweak or native bridge. Requires Python 3.7+ (standard library only). Apply additionally requires the real `minis-config` on your PATH inside Minis.
+MinisPersona includes a native draft editor for Minis and a separate CLI. The editor cannot apply settings.
+
+## Native draft editor
+
+In a supported Minis app window (`com.openminis.app`), tap **Persona** at the upper right. Edit **Style** and **Body**, then tap **Preview JSON** or **Copy JSON**. Copy writes plain text to the device-only clipboard with a ten-minute expiration. Copy does not save the draft or apply it. **Save Local Draft** stores the fields under one namespaced preference in the app container; closing discards unsaved edits. Keep secrets out of drafts and the clipboard.
+
+To apply, paste the copied JSON into a UTF-8 file and use the CLI commands below. There is no native bridge, request interception, or network access in the editor. Bundled presets remain available via the CLI.
+
+To remove the editor, optionally use **Clear Local Draft** first, then remove `com.knight914.minispersona` using the package manager and reopen Minis. Uninstalling does not revert any CLI-applied settings or necessarily clear the draft preference, clipboard, or files you exported. Use the audit rollback below for CLI-applied settings.
+
+## CLI
+
+Requires Python 3.7+ (standard library only). Apply additionally requires the real `minis-config` on your PATH inside Minis.
 
 ```sh
 cd /var/minis/shared/github/MinisPersona
@@ -47,3 +59,13 @@ python3 -B -m unittest -v
 ```
 
 Tests mock the config subprocess. Live app confirmation, application, and rollback are not exercised by the tests.
+
+## macOS build and formal packaging
+
+The native target requests iOS 15+ and `arm64`/`arm64e`. `.github/workflows/build.yml` is manual-only; `.github/scripts/build.sh` selects pinned official Theos (`theos/theos`, `rootless`) or RootHide Theos (`roothide/theos`, `roothide`) with recursive submodules. The jobs use separate runners, checkouts, build trees, and package outputs, select the runner's Apple iPhoneOS SDK, and log the Xcode, SDK, dependency, and toolchain revisions/versions. The repository does not ship or download a separate SDK.
+
+- **Compile check:** Dispatch with `formal_package` off (default). Both macOS jobs run the CLI tests, lint the bundle filter, and run `make all FINALPACKAGE=1` to compile and link under release flags. This is not a test packaging run: it must not produce or upload a `.deb`.
+- **Formal packaging:** Request `formal_package` explicitly at dispatch. Both compile checks must pass before the packaging matrix can run. Configure the `formal-packaging` GitHub Environment with required reviewers before dispatching if a separate post-compile human approval is needed; naming an environment in YAML does not configure reviewers. With approval (where configured), each job does a clean formal build of the same source revision using `make clean package FINALPACKAGE=1`. It checks exact package ID, version, architecture, dependencies, payload location, Mach-O slices, and filter, then uploads a scheme-specific `.deb` artifact. Nothing installs or publishes a release.
+- **Version gate:** `control` is the version source; dispatch input must match it. Both schemes and both stages of one dispatch share the version. Start at `0.0.1`; before each new dispatch, including a later formal run after a compile-only run, increment and commit the version in `control`. Failed and canceled dispatches still reserve their recorded versions. The workflow rejects GitHub reruns (including partial reruns in build steps), serializes dispatches, and rejects versions at or below earlier recorded dispatches. Keep workflow history and use a trusted ref: deleted runs and modified workflow code are not an authoritative history. A clean formal rebuild within the same approved dispatch belongs to that dispatch's single version reservation.
+
+Local Linux checks do not validate the iOS link, package format, injection, or presentation. After authorized packaging and installation, test launch and scene changes, that the Persona button does not cover existing controls, save/reopen/clear, validation and Unicode JSON, local clipboard, and absence of any settings change until the user explicitly applies through the CLI. Assess compatibility separately on both jailbreak environments.
