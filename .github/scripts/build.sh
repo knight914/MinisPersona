@@ -68,7 +68,7 @@ extract=$(mktemp -d)
 trap 'rm -rf "$extract"' EXIT
 dpkg-deb -x "$1" "$extract"
 location="$extract/$prefix/Library/MobileSubstrate/DynamicLibraries"
-xcrun lipo -verify_arch arm64 arm64e "$location/MinisPersona.dylib"
+xcrun lipo "$location/MinisPersona.dylib" -verify_arch arm64 arm64e
 python3 - "$location/MinisPersona.plist" <<'PY'
 import plistlib, sys
 with open(sys.argv[1], 'rb') as file:
