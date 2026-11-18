@@ -1,0 +1,9 @@
+Package: com.knight914.minispersona
+Name: MinisPersona
+Version: 0.0.1
+Architecture: iphoneos-arm64
+Description: Local persona draft editor for Minis; no settings are applied.
+Maintainer: knight914
+Author: knight914
+Section: Tweaks
+Depends: mobilesubstrate, firmware (>= 15.0)

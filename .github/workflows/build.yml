@@ -1,0 +1,106 @@
+name: MinisPersona build
+run-name: MinisPersona ${{ inputs.version }}
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version reserved in control for this round
+        required: true
+        type: string
+      formal_package:
+        description: Request formal .deb packaging after both compile checks pass
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+concurrency:
+  group: minispersona-build
+  cancel-in-progress: false
+
+jobs:
+  reserve:
+    runs-on: macos-15
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Validate version against control and dispatch history
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_RUN_ATTEMPT" = 1 || { echo 'Reruns are disabled; reserve a new version.'; exit 1; }
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/workflows/build.yml/runs?per_page=100" \
+            --jq '.workflow_runs[] | [.id, .display_title] | @tsv' > "$RUNNER_TEMP/minispersona-runs"
+          python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+
+          version = os.environ['VERSION']
+          match = re.fullmatch(r'0\.0\.([1-9][0-9]*)', version)
+          if not match or re.findall(r'^Version: (\S+)$', Path('control').read_text(), re.M) != [version]:
+              raise SystemExit('The input must match the single 0.0.N Version in control.')
+          run_id = int(os.environ['GITHUB_RUN_ID'])
+          runs = [line.split('\t', 1) for line in (Path(os.environ['RUNNER_TEMP']) / 'minispersona-runs').read_text().splitlines()]
+          if (str(run_id), f'MinisPersona {version}') not in [tuple(run) for run in runs]:
+              raise SystemExit('This dispatch is not yet visible in workflow history; stop closed.')
+          previous = []
+          for ident, title in runs:
+              prior = re.fullmatch(r'MinisPersona 0\.0\.([1-9][0-9]*)', title)
+              if int(ident) < run_id and prior:
+                  previous.append(int(prior[1]))
+          patch = int(match[1])
+          if not previous and patch != 1 or previous and patch <= max(previous):
+              raise SystemExit('Start at 0.0.1, then reserve a version above every earlier dispatch.')
+          PY
+
+  compile:
+    needs: reserve
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        scheme: [rootless, roothide]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Run tests and compile only
+        env:
+          SCHEME: ${{ matrix.scheme }}
+        run: |
+          test "$GITHUB_RUN_ATTEMPT" = 1 || exit 1
+          python3 -B -m unittest -v
+          plutil -lint MinisPersona.plist
+          bash .github/scripts/build.sh "$SCHEME" compile
+
+  package:
+    needs: compile
+    if: ${{ inputs.formal_package && github.run_attempt == '1' }}
+    environment: formal-packaging
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        scheme: [rootless, roothide]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Build and inspect the formal package
+        env:
+          SCHEME: ${{ matrix.scheme }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          test "$GITHUB_RUN_ATTEMPT" = 1 || exit 1
+          bash .github/scripts/build.sh "$SCHEME" package "$VERSION"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: MinisPersona-${{ matrix.scheme }}-${{ inputs.version }}
+          path: packages/*.deb
+          if-no-files-found: error
